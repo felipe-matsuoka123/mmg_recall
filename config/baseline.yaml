@@ -1,0 +1,39 @@
+project:
+  name: mammorecall
+  out_dir: runs/baseline_resnet50
+  seed: 42
+
+data:
+  data_root: data/processed/spr-mmg-01_u8_png
+  labels_csv: data/processed/spr-mmg-01_u8_png/labels.csv
+  train_csv: null
+  val_csv: null
+  test_csv: null
+  img_col: png_path
+  id_col: sample_id
+  label_col: label
+  zip_path: null
+  img_size: 1024
+  num_workers: 4
+  train_ratio: 0.9
+
+train:
+  epochs: 10
+  batch_size: 8
+  lr: 3.0e-4
+  weight_decay: 1.0e-2
+  amp: true
+  grad_accum_steps: 1
+
+model:
+  backbone: resnet50
+  pretrained: true
+  dropout: 0.0
+  num_classes: 2   # set 1 for BCE
+
+wandb:
+  enable: true
+  entity: null
+  project: mammorecall
+  run_name: baseline_resnet50
+  tags: ["baseline"]
