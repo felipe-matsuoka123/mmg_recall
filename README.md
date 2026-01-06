@@ -7,13 +7,30 @@ The workflow is designed to run locally or on a rented VM with a few commands.
 
 - Python 3.9+
 - GPU recommended for training
-- Python packages (install via your preferred method):
-  - torch, torchvision
-  - timm
-  - pandas, numpy, pillow
-  - pyyaml
-  - scikit-learn (optional, for AUC)
-  - wandb (optional, for experiment tracking)
+- Conda environment (recommended) or manual pip install
+
+### Conda environment (recommended)
+
+Create and activate the environment from `environment.yml`:
+```bash
+conda env create -f environment.yml
+conda activate mammorecall
+```
+
+If you change `environment.yml`, update the env:
+```bash
+conda env update -f environment.yml --prune
+```
+
+### Pip install (alternative)
+
+Python packages (install via your preferred method):
+- torch, torchvision
+- timm
+- pandas, numpy, pillow
+- pyyaml
+- scikit-learn (optional, for AUC)
+- wandb (optional, for experiment tracking)
 
 Example install:
 ```bash
