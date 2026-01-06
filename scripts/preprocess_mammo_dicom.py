@@ -1,5 +1,6 @@
 import json
 import os
+import csv
 from glob import glob
 from pathlib import Path
 
@@ -144,12 +145,19 @@ def create_u8_crop_and_meta(dicom_path, out_size=2048):
     return img_u8, meta
 
 
+def _stringify_value(value):
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
 def process_to_dir_png(input_dir, output_dir, out_size=2048):
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
 
     dicom_files = glob(str(input_dir / "**" / "*.dcm"), recursive=True)
     dicom_files.sort()
+    rows = []
 
     for p in tqdm(dicom_files, desc="Processing DICOMs", unit="file"):
         p = Path(p)
@@ -157,10 +165,8 @@ def process_to_dir_png(input_dir, output_dir, out_size=2048):
         base = rel.with_suffix("")                   # remove .dcm
 
         out_png = output_dir / "images" / (str(base) + ".png")
-        out_json = output_dir / "meta" / (str(base) + ".json")
 
         out_png.parent.mkdir(parents=True, exist_ok=True)
-        out_json.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             img_u8, meta = create_u8_crop_and_meta(p, out_size=out_size)
@@ -170,11 +176,25 @@ def process_to_dir_png(input_dir, output_dir, out_size=2048):
             if not ok:
                 raise RuntimeError(f"cv2.imwrite failed for {out_png}")
 
-            # Save metadata JSON sidecar
-            out_json.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+            row = {
+                "dicom_path": str(p),
+                "image_path": str(out_png),
+            }
+            row.update({k: _stringify_value(v) for k, v in meta.items()})
+            rows.append(row)
 
         except Exception as e:
             tqdm.write(f"Erro em {p}: {e}")
+
+    meta_csv = output_dir / "metadata.csv"
+    if rows:
+        fieldnames = sorted({k for r in rows for k in r.keys()})
+        meta_csv.parent.mkdir(parents=True, exist_ok=True)
+        with meta_csv.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for r in rows:
+                writer.writerow(r)
 
 
 
