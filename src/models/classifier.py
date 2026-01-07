@@ -1,11 +1,7 @@
 from __future__ import annotations
 import torch
 import torch.nn as nn
-
-try:
-    import timm
-except ImportError as e:
-    raise ImportError("Please install timm: pip install timm") from e
+import timm
 
 class MammogramClassifier(nn.Module):
     def __init__(

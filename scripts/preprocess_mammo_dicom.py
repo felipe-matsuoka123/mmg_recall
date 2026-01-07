@@ -1,6 +1,7 @@
 import json
-import os
 import csv
+import io
+import zipfile
 from glob import glob
 from pathlib import Path
 
@@ -98,6 +99,34 @@ def get_breast_implant_present(dcm):
     return _parse_yes_no(v)
 
 
+def parse_patient_age(dcm):
+    """
+    DICOM (0010,1010) Patient Age. Example: "045Y", "032M".
+    Returns years as float when possible, otherwise None.
+    """
+    age = getattr(dcm, "PatientAge", None)
+    if not age:
+        return None
+    s = str(age).strip().upper()
+    if len(s) < 2:
+        return None
+    unit = s[-1]
+    number = s[:-1]
+    try:
+        value = float(number)
+    except ValueError:
+        return None
+    if unit == "Y":
+        return value
+    if unit == "M":
+        return value / 12.0
+    if unit == "W":
+        return value / 52.0
+    if unit == "D":
+        return value / 365.0
+    return None
+
+
 def create_u8_crop_and_meta(dicom_path, out_size=2048):
     dcm = pydicom.dcmread(dicom_path, force=True)
     raw = dcm.pixel_array.astype(np.float32)
@@ -134,6 +163,7 @@ def create_u8_crop_and_meta(dicom_path, out_size=2048):
         "intercept": intercept,
         "manufacturer": manufacturer,
         "breast_implant_present": implant_present,  # <-- NEW
+        "age_years": parse_patient_age(dcm),
         "base_window": [float(lo_base), float(hi_base)],
         "window_params": {
             "ch0": [float(lo0), float(hi0)],
@@ -151,55 +181,61 @@ def _stringify_value(value):
     return value
 
 
-def process_to_dir_png(input_dir, output_dir, out_size=2048):
+def _accession_from_path(dicom_path, input_dir):
+    rel = dicom_path.relative_to(input_dir)
+    return rel.parts[0] if rel.parts else ""
+
+
+def process_to_zip_png(input_dir, output_zip, out_size=2048, png_root="spr-mmg-01"):
     input_dir = Path(input_dir)
-    output_dir = Path(output_dir)
+    output_zip = Path(output_zip)
 
     dicom_files = glob(str(input_dir / "**" / "*.dcm"), recursive=True)
     dicom_files.sort()
     rows = []
 
-    for p in tqdm(dicom_files, desc="Processing DICOMs", unit="file"):
-        p = Path(p)
-        rel = p.relative_to(input_dir)               # preserve folder structure
-        base = rel.with_suffix("")                   # remove .dcm
+    output_zip.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for p in tqdm(dicom_files, desc="Processing DICOMs", unit="file"):
+            p = Path(p)
+            rel = p.relative_to(input_dir)               # preserve folder structure
+            base = rel.with_suffix("")                   # remove .dcm
 
-        out_png = output_dir / "images" / (str(base) + ".png")
+            out_png_rel = Path(png_root) / (str(base) + ".png")
 
-        out_png.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                img_u8, meta = create_u8_crop_and_meta(p, out_size=out_size)
 
-        try:
-            img_u8, meta = create_u8_crop_and_meta(p, out_size=out_size)
+                ok, enc = cv2.imencode(".png", img_u8)
+                if not ok:
+                    raise RuntimeError(f"cv2.imencode failed for {p}")
 
-            # Save grayscale PNG
-            ok = cv2.imwrite(str(out_png), img_u8)
-            if not ok:
-                raise RuntimeError(f"cv2.imwrite failed for {out_png}")
+                zf.writestr(str(out_png_rel), enc.tobytes())
 
-            row = {
-                "dicom_path": str(p),
-                "image_path": str(out_png),
-            }
-            row.update({k: _stringify_value(v) for k, v in meta.items()})
-            rows.append(row)
+                row = {
+                    "accession_number": _accession_from_path(p, input_dir),
+                    "image_path": str(out_png_rel),
+                }
+                row.update({k: _stringify_value(v) for k, v in meta.items()})
+                rows.append(row)
 
-        except Exception as e:
-            tqdm.write(f"Erro em {p}: {e}")
+            except Exception as e:
+                tqdm.write(f"Erro em {p}: {e}")
 
-    meta_csv = output_dir / "metadata.csv"
-    if rows:
-        fieldnames = sorted({k for r in rows for k in r.keys()})
-        meta_csv.parent.mkdir(parents=True, exist_ok=True)
-        with meta_csv.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if rows:
+            fieldnames = sorted({k for r in rows for k in r.keys()})
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=fieldnames)
             writer.writeheader()
             for r in rows:
                 writer.writerow(r)
+            zf.writestr("metadata.csv", buf.getvalue())
 
 
 
-process_to_dir_png(
+process_to_zip_png(
      input_dir="/home/felipe/spr-mmg-1",
-     output_dir="/home/felipe/projects/MammoRecall/data/processed/spr-mmg-01_u8_png",
-     out_size=2048
+     output_zip="/home/felipe/projects/MammoRecall/data/spr-mmg-01.zip",
+     out_size=2048,
+     png_root="spr-mmg-01",
  )
