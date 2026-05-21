@@ -8,7 +8,8 @@ import csv
 import io
 import sys
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from enum import Enum
 from pathlib import Path
 
@@ -16,9 +17,10 @@ try:
     import cv2
     import numpy as np
     import pydicom
+    from tqdm import tqdm
 except ImportError as exc:  # pragma: no cover - depends on the runtime environment.
     raise SystemExit(
-        "DICOM preprocessing requires numpy, pydicom, and opencv-python."
+        "DICOM preprocessing requires numpy, pydicom, opencv-python, and tqdm."
     ) from exc
 
 
@@ -156,19 +158,38 @@ def image_metadata(
     }
 
 
-def create_u8_image(cropped: np.ndarray, variant: ImageVariant) -> np.ndarray:
+def create_u8_images(
+    cropped: np.ndarray,
+    variants: Sequence[ImageVariant | str],
+) -> dict[ImageVariant, np.ndarray]:
+    """Create one or more PNG payloads while sharing crop windowing work."""
+    requested_variants = tuple(ImageVariant(variant) for variant in variants)
+    if not requested_variants:
+        raise ValueError("At least one image variant is required")
+
     base_low, base_high = np.percentile(cropped, (0.5, 99.5))
     base_image = window_u8(cropped, float(base_low), float(base_high))
-    if variant == ImageVariant.GRAYSCALE:
-        return base_image
-    if variant == ImageVariant.RGB_REPLICATED:
-        return np.repeat(base_image[..., None], 3, axis=2)
+    images = {}
+    if ImageVariant.GRAYSCALE in requested_variants:
+        images[ImageVariant.GRAYSCALE] = base_image
+    if ImageVariant.RGB_REPLICATED in requested_variants:
+        images[ImageVariant.RGB_REPLICATED] = np.repeat(base_image[..., None], 3, axis=2)
 
-    bright_low, bright_high = np.percentile(cropped, (95, 99.9))
-    tissue_low, tissue_high = np.percentile(cropped, (10, 90))
-    bright_image = window_u8(cropped, float(bright_low), float(bright_high))
-    tissue_image = window_u8(cropped, float(tissue_low), float(tissue_high))
-    return np.dstack((base_image, bright_image, tissue_image))
+    if ImageVariant.RGB_MULTIWINDOW in requested_variants:
+        bright_low, bright_high = np.percentile(cropped, (95, 99.9))
+        tissue_low, tissue_high = np.percentile(cropped, (10, 90))
+        bright_image = window_u8(cropped, float(bright_low), float(bright_high))
+        tissue_image = window_u8(cropped, float(tissue_low), float(tissue_high))
+        images[ImageVariant.RGB_MULTIWINDOW] = np.dstack(
+            (base_image, bright_image, tissue_image)
+        )
+
+    return {variant: images[variant] for variant in requested_variants}
+
+
+def create_u8_image(cropped: np.ndarray, variant: ImageVariant | str) -> np.ndarray:
+    image_variant = ImageVariant(variant)
+    return create_u8_images(cropped, (image_variant,))[image_variant]
 
 
 def read_crop_and_metadata(
@@ -240,6 +261,30 @@ def encode_png(image_u8: np.ndarray) -> bytes:
     return encoded.tobytes()
 
 
+def write_metadata_csv(
+    archive: zipfile.ZipFile,
+    metadata_rows: Sequence[dict[str, str | int]],
+) -> None:
+    metadata_buffer = io.StringIO()
+    metadata_writer = csv.DictWriter(metadata_buffer, fieldnames=METADATA_FIELDS)
+    metadata_writer.writeheader()
+    metadata_writer.writerows(metadata_rows)
+    archive.writestr("metadata.csv", metadata_buffer.getvalue())
+
+
+def report_failures(processed: int, total: int, failures: Sequence[str]) -> None:
+    if not failures:
+        return
+
+    print(
+        f"Converted {processed}/{total} DICOM files; "
+        f"{len(failures)} failed:",
+        file=sys.stderr,
+    )
+    for failure in failures:
+        print(f"  {failure}", file=sys.stderr)
+
+
 def process_dicom_dir_to_png_zip(
     dicom_dir: str | Path,
     output_zip: str | Path,
@@ -262,7 +307,11 @@ def process_dicom_dir_to_png_zip(
     metadata_rows: list[dict[str, str | int]] = []
 
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for dicom_path in dicom_files:
+        for dicom_path in tqdm(
+            dicom_files,
+            desc=f"Preprocessing {image_variant.value}",
+            unit="dicom",
+        ):
             try:
                 image_u8, metadata = create_u8_crop_and_metadata(dicom_path, image_variant)
 
@@ -279,26 +328,82 @@ def process_dicom_dir_to_png_zip(
                     raise RuntimeError(f"Failed to preprocess {dicom_path}: {exc}") from exc
                 failures.append(f"{dicom_path}: {exc}")
 
-        metadata_buffer = io.StringIO()
-        metadata_writer = csv.DictWriter(metadata_buffer, fieldnames=METADATA_FIELDS)
-        metadata_writer.writeheader()
-        metadata_writer.writerows(metadata_rows)
-        archive.writestr("metadata.csv", metadata_buffer.getvalue())
+        write_metadata_csv(archive, metadata_rows)
 
     if not processed:
         output_path.unlink(missing_ok=True)
         raise RuntimeError("No DICOM files were successfully converted")
 
-    if failures:
-        print(
-            f"Converted {processed}/{len(dicom_files)} DICOM files; "
-            f"{len(failures)} failed:",
-            file=sys.stderr,
-        )
-        for failure in failures:
-            print(f"  {failure}", file=sys.stderr)
+    report_failures(processed, len(dicom_files), failures)
 
     return output_path
+
+
+def process_dicom_dir_to_png_zips(
+    dicom_dir: str | Path,
+    output_zips: Mapping[ImageVariant | str, str | Path],
+    *,
+    png_root: str | None = None,
+    continue_on_error: bool = False,
+) -> dict[ImageVariant, Path]:
+    """Write multiple PNG variants while decoding and cropping each DICOM once."""
+    input_dir = Path(dicom_dir).resolve()
+    output_paths = {
+        ImageVariant(variant): Path(output_zip)
+        for variant, output_zip in output_zips.items()
+    }
+    if not output_paths:
+        raise ValueError("At least one output zip is required")
+
+    dicom_files = discover_dicom_files(input_dir)
+    if not dicom_files:
+        raise FileNotFoundError(f"No .dcm files found under {input_dir}")
+
+    for output_path in output_paths.values():
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    processed = 0
+    failures: list[str] = []
+    metadata_rows = {variant: [] for variant in output_paths}
+
+    with ExitStack() as stack:
+        archives = {
+            variant: stack.enter_context(
+                zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED)
+            )
+            for variant, output_path in output_paths.items()
+        }
+        for dicom_path in tqdm(
+            dicom_files,
+            desc="Preprocessing dataset variants",
+            unit="dicom",
+        ):
+            try:
+                cropped, metadata = read_crop_and_metadata(dicom_path)
+                images = create_u8_images(cropped, tuple(output_paths))
+                processed_path = png_archive_path(dicom_path, input_dir, png_root).as_posix()
+
+                for variant, archive in archives.items():
+                    archive.writestr(processed_path, encode_png(images[variant]))
+                    variant_metadata = metadata.copy()
+                    variant_metadata["processed_path"] = processed_path
+                    metadata_rows[variant].append(variant_metadata)
+                processed += 1
+            except Exception as exc:
+                if not continue_on_error:
+                    raise RuntimeError(f"Failed to preprocess {dicom_path}: {exc}") from exc
+                failures.append(f"{dicom_path}: {exc}")
+
+        for variant, archive in archives.items():
+            write_metadata_csv(archive, metadata_rows[variant])
+
+    if not processed:
+        for output_path in output_paths.values():
+            output_path.unlink(missing_ok=True)
+        raise RuntimeError("No DICOM files were successfully converted")
+
+    report_failures(processed, len(dicom_files), failures)
+    return output_paths
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

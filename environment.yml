@@ -10,7 +10,13 @@ dependencies:
   - pytest
   - pip
   - pip:
+      - torch
+      - torchvision
+      - pillow
+      - pyyaml
+      - wandb
       - pydicom
+      - pylibjpeg[all]
       - opencv-python
       - jupyter
       - matplotlib

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -89,3 +90,65 @@ def test_create_u8_image_variants_keep_crop_size() -> None:
     assert (rgb_replicated[..., 0] == grayscale).all()
     assert (rgb_replicated[..., 1] == grayscale).all()
     assert (rgb_replicated[..., 2] == grayscale).all()
+
+
+def test_create_u8_images_shares_requested_variant_output() -> None:
+    cropped = preprocess_mammo_dicom.np.arange(
+        100, dtype=preprocess_mammo_dicom.np.float32
+    )
+    cropped = cropped.reshape((10, 10))
+
+    images = preprocess_mammo_dicom.create_u8_images(
+        cropped,
+        (
+            preprocess_mammo_dicom.ImageVariant.GRAYSCALE,
+            preprocess_mammo_dicom.ImageVariant.RGB_REPLICATED,
+        ),
+    )
+
+    assert list(images) == [
+        preprocess_mammo_dicom.ImageVariant.GRAYSCALE,
+        preprocess_mammo_dicom.ImageVariant.RGB_REPLICATED,
+    ]
+    assert (
+        images[preprocess_mammo_dicom.ImageVariant.RGB_REPLICATED][..., 0]
+        == images[preprocess_mammo_dicom.ImageVariant.GRAYSCALE]
+    ).all()
+
+
+def test_multi_zip_writer_reads_crop_once_per_dicom(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dicom_paths = [tmp_path / "dicoms" / "a.dcm", tmp_path / "dicoms" / "nested" / "b.dcm"]
+    for dicom_path in dicom_paths:
+        dicom_path.parent.mkdir(parents=True, exist_ok=True)
+        dicom_path.touch()
+
+    read_paths = []
+
+    def fake_read_crop_and_metadata(dicom_path: Path) -> tuple[object, dict[str, str]]:
+        read_paths.append(dicom_path)
+        metadata = {field: "" for field in preprocess_mammo_dicom.METADATA_FIELDS}
+        cropped = preprocess_mammo_dicom.np.arange(
+            100, dtype=preprocess_mammo_dicom.np.float32
+        ).reshape((10, 10))
+        return cropped, metadata
+
+    monkeypatch.setattr(
+        preprocess_mammo_dicom,
+        "read_crop_and_metadata",
+        fake_read_crop_and_metadata,
+    )
+
+    output_paths = preprocess_mammo_dicom.process_dicom_dir_to_png_zips(
+        tmp_path / "dicoms",
+        {
+            preprocess_mammo_dicom.ImageVariant.GRAYSCALE: tmp_path / "gray.zip",
+            preprocess_mammo_dicom.ImageVariant.RGB_REPLICATED: tmp_path / "rgb.zip",
+        },
+    )
+
+    assert read_paths == dicom_paths
+    for output_path in output_paths.values():
+        with zipfile.ZipFile(output_path) as archive:
+            assert archive.namelist() == ["a.png", "nested/b.png", "metadata.csv"]

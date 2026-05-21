@@ -4,7 +4,7 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-from preprocess_mammo_dicom import ImageVariant, process_dicom_dir_to_png_zip
+from preprocess_mammo_dicom import ImageVariant, process_dicom_dir_to_png_zips
 
 
 DATASET_VARIANTS = {
@@ -37,15 +37,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    for dataset_name, variant in DATASET_VARIANTS.items():
-        output_zip = args.output_dir / f"{dataset_name}.zip"
-        zip_path = process_dicom_dir_to_png_zip(
-            args.dicom_dir,
-            output_zip,
-            png_root=args.png_root,
-            variant=variant,
-            continue_on_error=args.continue_on_error,
-        )
+    output_zips = {
+        variant: args.output_dir / f"{dataset_name}.zip"
+        for dataset_name, variant in DATASET_VARIANTS.items()
+    }
+    zip_paths = process_dicom_dir_to_png_zips(
+        args.dicom_dir,
+        output_zips,
+        png_root=args.png_root,
+        continue_on_error=args.continue_on_error,
+    )
+    for variant in DATASET_VARIANTS.values():
+        zip_path = zip_paths[variant]
         print(zip_path)
 
     return 0
