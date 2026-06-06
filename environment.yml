@@ -20,4 +20,6 @@ dependencies:
       - opencv-python
       - jupyter
       - matplotlib
+      - pandas
+      - seaborn
       - tqdm

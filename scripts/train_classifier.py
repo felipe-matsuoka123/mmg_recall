@@ -20,26 +20,47 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from mammorecall.data import (  # noqa: E402
+    DirectoryPngDataset,
+    MultiSourcePngDataset,
     ZipPngDataset,
     attach_labels,
     build_label_map,
-    read_metadata_rows,
+    filter_rows_by_dataset,
+    read_metadata_from_source,
     split_rows_by_group,
 )
 from mammorecall.engine import run_epoch  # noqa: E402
 from mammorecall.models import build_model  # noqa: E402
 
 
+def optional_path(value: str | None) -> Path | None:
+    if value is None or value.strip().lower() in {"", "none", "null"}:
+        return None
+    return Path(value)
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", type=Path, default=None)
-    parser.add_argument("--data-zip", type=Path, default=None)
-    parser.add_argument("--labels-csv", type=Path, default=None)
+    parser.add_argument("--data-zip", type=optional_path, default=None)
+    parser.add_argument("--data-root", type=optional_path, default=None)
+    parser.add_argument("--metadata-csv", type=optional_path, default=None)
+    parser.add_argument("--labels-csv", type=optional_path, default=None)
     parser.add_argument("--metadata-member", default="metadata.csv")
     parser.add_argument("--label-key", default="image_id")
-    parser.add_argument("--label-col", default="label")
+    parser.add_argument("--row-key", default="image_id")
+    parser.add_argument("--label-col", default="target")
     parser.add_argument("--patient-col", default="patient_id")
+    parser.add_argument("--dataset-name", default=None)
+    parser.add_argument("--dataset-col", default="dataset")
+    parser.add_argument("--labels-dataset-col", default="dataset")
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--require-all-labels", action="store_true")
     parser.add_argument("--run-dir", type=Path, default=Path("runs/local_baseline"))
-    parser.add_argument("--model", choices=["simple_cnn", "resnet18"], default="simple_cnn")
+    parser.add_argument(
+        "--model",
+        choices=["simple_cnn", "resnet18", "convnext_tiny", "convnext_small"],
+        default="simple_cnn",
+    )
     parser.add_argument("--input-channels", type=int, choices=[1, 3], default=1)
     parser.add_argument("--image-size", type=int, default=512)
     parser.add_argument("--epochs", type=int, default=3)
@@ -51,7 +72,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--pretrained", action="store_true")
-    parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--wandb", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--wandb-project", default="mammorecall")
     parser.add_argument("--wandb-entity", default=None)
     parser.add_argument("--wandb-run-name", default=None)
@@ -89,6 +110,126 @@ def json_ready_config(args: argparse.Namespace) -> dict[str, object]:
         key: str(value) if isinstance(value, Path) else value
         for key, value in vars(args).items()
     }
+
+
+def source_optional_path(source: dict[str, object], key: str) -> Path | None:
+    value = source.get(key)
+    if value is None:
+        return None
+    if isinstance(value, Path):
+        return value
+    value = str(value)
+    if value.strip().lower() in {"", "none", "null"}:
+        return None
+    return Path(value)
+
+
+def load_source_rows(
+    *,
+    source: dict[str, object],
+    source_index: int,
+    args: argparse.Namespace,
+) -> list[dict[str, str]]:
+    dataset_name = source.get("dataset_name") or args.dataset_name
+    row_key = source.get("row_key") or getattr(args, "row_key", None) or args.label_key
+    data_zip = source_optional_path(source, "data_zip")
+    data_root = source_optional_path(source, "data_root")
+    metadata_csv = source_optional_path(source, "metadata_csv")
+    rows = read_metadata_from_source(
+        data_zip=data_zip,
+        data_root=data_root,
+        metadata_csv=metadata_csv,
+        member=str(source.get("metadata_member") or args.metadata_member),
+    )
+    for row in rows:
+        if row.get("processed_path"):
+            row["processed_path_stem"] = Path(row["processed_path"]).stem
+    rows = filter_rows_by_dataset(
+        rows,
+        dataset_col=args.dataset_col,
+        dataset_name=str(dataset_name) if dataset_name else None,
+    )
+    rows = attach_labels(
+        rows,
+        args.labels_csv,
+        label_key=args.label_key,
+        label_col=args.label_col,
+        row_key=str(row_key),
+        labels_dataset_col=args.labels_dataset_col,
+        dataset_name=str(dataset_name) if dataset_name else None,
+        require_all=args.require_all_labels,
+    )
+    for row in rows:
+        row["_source_index"] = str(source_index)
+        row["_dataset_name"] = str(dataset_name or source_index)
+        patient_id = row.get(args.patient_col, "").strip()
+        row["_split_group"] = f"{row['_dataset_name']}:{patient_id or row.get(args.label_key, '')}"
+    return rows
+
+
+def load_training_rows(args: argparse.Namespace) -> tuple[list[dict[str, str]], list[dict[str, object]]]:
+    if getattr(args, "data_sources", None):
+        sources = list(args.data_sources)
+        all_rows = []
+        normalized_sources = []
+        for source_index, source in enumerate(sources):
+            data_zip = source_optional_path(source, "data_zip")
+            data_root = source_optional_path(source, "data_root")
+            if bool(data_zip) == bool(data_root):
+                raise SystemExit(
+                    f"data_sources[{source_index}] must set exactly one of data_zip or data_root."
+                )
+            normalized_sources.append({"data_zip": data_zip, "data_root": data_root})
+            all_rows.extend(load_source_rows(source=source, source_index=source_index, args=args))
+        return all_rows, normalized_sources
+
+    if bool(args.data_zip) == bool(args.data_root):
+        raise SystemExit("Pass exactly one of --data-zip or --data-root.")
+    source = {
+        "dataset_name": args.dataset_name,
+        "data_zip": args.data_zip,
+        "data_root": args.data_root,
+        "metadata_csv": args.metadata_csv,
+        "metadata_member": args.metadata_member,
+    }
+    rows = load_source_rows(source=source, source_index=0, args=args)
+    return rows, [{"data_zip": args.data_zip, "data_root": args.data_root}]
+
+
+def build_dataset(
+    args: argparse.Namespace,
+    rows: list[dict[str, str]],
+    label_map: dict[str, int],
+):
+    dataset_kwargs = {
+        "rows": rows,
+        "label_map": label_map,
+        "label_col": args.label_col,
+        "input_channels": args.input_channels,
+        "image_size": args.image_size,
+    }
+    if getattr(args, "data_sources", None):
+        return MultiSourcePngDataset(args.normalized_sources, **dataset_kwargs)
+    if args.data_zip:
+        return ZipPngDataset(args.data_zip, **dataset_kwargs)
+    return DirectoryPngDataset(args.data_root, **dataset_kwargs)
+
+
+def limit_rows(
+    rows: list[dict[str, str]],
+    *,
+    max_samples: int | None,
+    seed: int,
+) -> list[dict[str, str]]:
+    if max_samples is None:
+        return rows
+    if max_samples <= 0:
+        raise ValueError(f"max_samples must be positive, got {max_samples}")
+    if len(rows) <= max_samples:
+        return rows
+    sampled_rows = list(rows)
+    random.Random(seed).shuffle(sampled_rows)
+    return sampled_rows[:max_samples]
 
 
 def save_checkpoint(
@@ -131,41 +272,34 @@ def start_wandb(args: argparse.Namespace, config: dict[str, object]):
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    if not args.data_zip:
-        raise SystemExit("Pass --data-zip or set data_zip in --config.")
-    args.data_zip = Path(args.data_zip)
+    args.data_zip = Path(args.data_zip) if args.data_zip else None
+    args.data_root = Path(args.data_root) if args.data_root else None
+    args.metadata_csv = Path(args.metadata_csv) if args.metadata_csv else None
     args.run_dir = Path(args.run_dir)
     args.labels_csv = Path(args.labels_csv) if args.labels_csv else None
     set_seed(args.seed)
     device = select_device(args.device)
     config = json_ready_config(args)
 
-    rows = read_metadata_rows(args.data_zip, args.metadata_member)
-    rows = attach_labels(rows, args.labels_csv, label_key=args.label_key, label_col=args.label_col)
+    rows, normalized_sources = load_training_rows(args)
+    args.normalized_sources = normalized_sources
+    if not rows:
+        raise SystemExit("No rows available after metadata/label filtering.")
+    source_counts = {
+        dataset_name: sum(1 for row in rows if row["_dataset_name"] == dataset_name)
+        for dataset_name in sorted({row["_dataset_name"] for row in rows})
+    }
+    rows = limit_rows(rows, max_samples=args.max_samples, seed=args.seed)
     train_rows, val_rows = split_rows_by_group(
         rows,
-        group_col=args.patient_col,
+        group_col="_split_group",
         val_fraction=args.val_fraction,
         seed=args.seed,
     )
     label_map = build_label_map(rows, args.label_col)
 
-    train_dataset = ZipPngDataset(
-        args.data_zip,
-        train_rows,
-        label_map=label_map,
-        label_col=args.label_col,
-        input_channels=args.input_channels,
-        image_size=args.image_size,
-    )
-    val_dataset = ZipPngDataset(
-        args.data_zip,
-        val_rows,
-        label_map=label_map,
-        label_col=args.label_col,
-        input_channels=args.input_channels,
-        image_size=args.image_size,
-    )
+    train_dataset = build_dataset(args, train_rows, label_map)
+    val_dataset = build_dataset(args, val_rows, label_map)
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -195,7 +329,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     (args.run_dir / "label_map.json").write_text(json.dumps(label_map, indent=2) + "\n")
     print(
         f"device={device} train_images={len(train_dataset)} "
-        f"val_images={len(val_dataset)} classes={label_map}"
+        f"val_images={len(val_dataset)} classes={label_map} sources={source_counts}"
     )
 
     run = start_wandb(args, config)
@@ -217,11 +351,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "val/loss": val_metrics["loss"],
                 "val/accuracy": val_metrics["accuracy"],
             }
+            if "auroc" in train_metrics:
+                metrics["train/auroc"] = train_metrics["auroc"]
+            if "auroc" in val_metrics:
+                metrics["val/auroc"] = val_metrics["auroc"]
             print(
                 f"epoch={epoch} train_loss={train_metrics['loss']:.4f} "
                 f"train_acc={train_metrics['accuracy']:.4f} "
                 f"val_loss={val_metrics['loss']:.4f} "
-                f"val_acc={val_metrics['accuracy']:.4f}"
+                f"val_acc={val_metrics['accuracy']:.4f} "
+                f"val_auroc={val_metrics.get('auroc', float('nan')):.4f}"
             )
             if run:
                 run.log(metrics)

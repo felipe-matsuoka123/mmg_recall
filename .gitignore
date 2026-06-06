@@ -1,5 +1,31 @@
+# Local data and generated datasets
 data/
+processed_datasets/
+preview/
+outputs/
+
+# Labels/manifests generated from local raw datasets
+combined_mammo_recall_labels*.csv
+*_manifest.csv
+*_metadata.csv
+
+# Training outputs and experiment trackers
 runs/
 wandb/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Python/cache artifacts
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Local secrets and cloud credentials
+.env
+.env.*
+*.pem
+*.key
+*.jsonl

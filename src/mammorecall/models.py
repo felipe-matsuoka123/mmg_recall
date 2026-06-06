@@ -55,6 +55,45 @@ def _adapt_resnet_input(model: nn.Module, input_channels: int, pretrained: bool)
     model.conv1 = new_conv
 
 
+def _replace_first_conv(model: nn.Module, input_channels: int, pretrained: bool) -> None:
+    if input_channels == 3:
+        return
+    if input_channels != 1:
+        raise ValueError(f"input_channels must be 1 or 3, got {input_channels}")
+
+    for module in model.modules():
+        for name, child in module.named_children():
+            if isinstance(child, nn.Conv2d):
+                new_conv = nn.Conv2d(
+                    input_channels,
+                    child.out_channels,
+                    kernel_size=child.kernel_size,
+                    stride=child.stride,
+                    padding=child.padding,
+                    dilation=child.dilation,
+                    groups=child.groups,
+                    bias=child.bias is not None,
+                    padding_mode=child.padding_mode,
+                )
+                if pretrained:
+                    with torch.no_grad():
+                        new_conv.weight.copy_(child.weight.mean(dim=1, keepdim=True))
+                        if child.bias is not None and new_conv.bias is not None:
+                            new_conv.bias.copy_(child.bias)
+                setattr(module, name, new_conv)
+                return
+    raise ValueError("Could not find a Conv2d input layer to adapt.")
+
+
+def _replace_classifier_linear(model: nn.Module, num_classes: int) -> nn.Module:
+    for module in reversed(list(model.modules())):
+        for name, child in module.named_children():
+            if isinstance(child, nn.Linear):
+                setattr(module, name, nn.Linear(child.in_features, num_classes))
+                return model
+    raise ValueError("Could not find a Linear classifier layer to replace.")
+
+
 def build_model(
     model_name: str,
     *,
@@ -70,4 +109,15 @@ def build_model(
         _adapt_resnet_input(model, input_channels, pretrained)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
         return model
-    raise ValueError(f"Unsupported model '{model_name}'. Use 'simple_cnn' or 'resnet18'.")
+    if model_name == "convnext_tiny":
+        weights = models.ConvNeXt_Tiny_Weights.DEFAULT if pretrained else None
+        model = models.convnext_tiny(weights=weights)
+        _replace_first_conv(model, input_channels, pretrained)
+        return _replace_classifier_linear(model, num_classes)
+    if model_name == "convnext_small":
+        weights = models.ConvNeXt_Small_Weights.DEFAULT if pretrained else None
+        model = models.convnext_small(weights=weights)
+        _replace_first_conv(model, input_channels, pretrained)
+        return _replace_classifier_linear(model, num_classes)
+    supported = "simple_cnn, resnet18, convnext_tiny, convnext_small"
+    raise ValueError(f"Unsupported model '{model_name}'. Use one of: {supported}.")

@@ -4,6 +4,7 @@ import csv
 import io
 import random
 import zipfile
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from pathlib import Path
 
@@ -25,12 +26,34 @@ def read_metadata_rows(data_zip: str | Path, member: str = "metadata.csv") -> li
             return list(csv.DictReader(text))
 
 
+def read_metadata_from_source(
+    *,
+    data_zip: str | Path | None = None,
+    data_root: str | Path | None = None,
+    metadata_csv: str | Path | None = None,
+    member: str = "metadata.csv",
+) -> list[dict[str, str]]:
+    if metadata_csv:
+        return read_csv_rows(metadata_csv)
+    if data_zip and data_root:
+        raise ValueError("Pass only one of data_zip or data_root.")
+    if data_zip:
+        return read_metadata_rows(data_zip, member)
+    if data_root:
+        return read_csv_rows(Path(data_root) / member)
+    raise ValueError("Pass data_zip or data_root.")
+
+
 def attach_labels(
     rows: list[dict[str, str]],
     labels_csv: str | Path | None,
     *,
     label_key: str,
     label_col: str,
+    row_key: str | None = None,
+    labels_dataset_col: str | None = None,
+    dataset_name: str | None = None,
+    require_all: bool = True,
 ) -> list[dict[str, str]]:
     if labels_csv is None:
         labeled = [row for row in rows if row.get(label_col, "").strip()]
@@ -42,6 +65,10 @@ def attach_labels(
         return rows
 
     label_rows = read_csv_rows(labels_csv)
+    if labels_dataset_col and dataset_name:
+        label_rows = [
+            row for row in label_rows if row.get(labels_dataset_col, "").strip() == dataset_name
+        ]
     labels_by_key = {
         row[label_key]: row[label_col]
         for row in label_rows
@@ -49,23 +76,35 @@ def attach_labels(
     }
     missing = []
     merged_rows = []
+    row_key = row_key or label_key
     for row in rows:
-        row_key = row.get(label_key, "")
-        label = labels_by_key.get(row_key)
+        key_value = row.get(row_key, "")
+        label = labels_by_key.get(key_value)
         if label is None:
-            missing.append(row_key)
+            missing.append(key_value)
             continue
         merged_row = dict(row)
         merged_row[label_col] = label
         merged_rows.append(merged_row)
 
-    if missing:
+    if missing and require_all:
         examples = ", ".join(repr(key) for key in missing[:3])
         raise ValueError(
             f"Missing labels for {len(missing)} metadata rows using key '{label_key}'. "
             f"First keys: {examples}"
         )
     return merged_rows
+
+
+def filter_rows_by_dataset(
+    rows: list[dict[str, str]],
+    *,
+    dataset_col: str | None,
+    dataset_name: str | None,
+) -> list[dict[str, str]]:
+    if not rows or not dataset_col or not dataset_name or dataset_col not in rows[0]:
+        return rows
+    return [row for row in rows if row.get(dataset_col, "").strip() == dataset_name]
 
 
 def build_label_map(rows: list[dict[str, str]], label_col: str) -> dict[str, int]:
@@ -120,7 +159,40 @@ def build_transform(image_size: int, input_channels: int) -> transforms.Compose:
     )
 
 
-class ZipPngDataset(Dataset):
+class PngDataset(Dataset, ABC):
+    def __init__(
+        self,
+        rows: list[dict[str, str]],
+        *,
+        label_map: dict[str, int],
+        label_col: str,
+        input_channels: int,
+        image_size: int,
+    ) -> None:
+        self.rows = rows
+        self.label_map = label_map
+        self.label_col = label_col
+        self.input_channels = input_channels
+        self.transform = build_transform(image_size, input_channels)
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    @abstractmethod
+    def _open_image(self, row: dict[str, str]) -> Image.Image:
+        """Open one processed PNG as a PIL image."""
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        row = self.rows[index]
+        with self._open_image(row) as image:
+            mode = "L" if self.input_channels == 1 else "RGB"
+            tensor = self.transform(image.convert(mode))
+
+        target = torch.tensor(self.label_map[row[self.label_col]], dtype=torch.long)
+        return tensor, target
+
+
+class ZipPngDataset(PngDataset):
     def __init__(
         self,
         data_zip: str | Path,
@@ -131,16 +203,15 @@ class ZipPngDataset(Dataset):
         input_channels: int,
         image_size: int,
     ) -> None:
+        super().__init__(
+            rows,
+            label_map=label_map,
+            label_col=label_col,
+            input_channels=input_channels,
+            image_size=image_size,
+        )
         self.data_zip = Path(data_zip)
-        self.rows = rows
-        self.label_map = label_map
-        self.label_col = label_col
-        self.input_channels = input_channels
-        self.transform = build_transform(image_size, input_channels)
         self._archive: zipfile.ZipFile | None = None
-
-    def __len__(self) -> int:
-        return len(self.rows)
 
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
@@ -152,12 +223,82 @@ class ZipPngDataset(Dataset):
             self._archive = zipfile.ZipFile(self.data_zip)
         return self._archive
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
-        row = self.rows[index]
+    def _open_image(self, row: dict[str, str]) -> Image.Image:
         with self._zip().open(row["processed_path"]) as handle:
-            with Image.open(handle) as image:
-                mode = "L" if self.input_channels == 1 else "RGB"
-                tensor = self.transform(image.convert(mode))
+            return Image.open(handle).copy()
 
-        target = torch.tensor(self.label_map[row[self.label_col]], dtype=torch.long)
-        return tensor, target
+
+class DirectoryPngDataset(PngDataset):
+    def __init__(
+        self,
+        data_root: str | Path,
+        rows: list[dict[str, str]],
+        *,
+        label_map: dict[str, int],
+        label_col: str,
+        input_channels: int,
+        image_size: int,
+    ) -> None:
+        super().__init__(
+            rows,
+            label_map=label_map,
+            label_col=label_col,
+            input_channels=input_channels,
+            image_size=image_size,
+        )
+        self.data_root = Path(data_root)
+
+    def _open_image(self, row: dict[str, str]) -> Image.Image:
+        return Image.open(self.data_root / row["processed_path"])
+
+
+class MultiSourcePngDataset(PngDataset):
+    def __init__(
+        self,
+        sources: list[dict[str, str | Path | None]],
+        rows: list[dict[str, str]],
+        *,
+        label_map: dict[str, int],
+        label_col: str,
+        input_channels: int,
+        image_size: int,
+    ) -> None:
+        super().__init__(
+            rows,
+            label_map=label_map,
+            label_col=label_col,
+            input_channels=input_channels,
+            image_size=image_size,
+        )
+        self.sources = [
+            {
+                "data_zip": Path(source["data_zip"]) if source.get("data_zip") else None,
+                "data_root": Path(source["data_root"]) if source.get("data_root") else None,
+            }
+            for source in sources
+        ]
+        self._archives: dict[int, zipfile.ZipFile] = {}
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state["_archives"] = {}
+        return state
+
+    def _zip(self, source_index: int) -> zipfile.ZipFile:
+        if source_index not in self._archives:
+            data_zip = self.sources[source_index]["data_zip"]
+            if data_zip is None:
+                raise ValueError(f"Source {source_index} does not have data_zip.")
+            self._archives[source_index] = zipfile.ZipFile(data_zip)
+        return self._archives[source_index]
+
+    def _open_image(self, row: dict[str, str]) -> Image.Image:
+        source_index = int(row["_source_index"])
+        source = self.sources[source_index]
+        if source["data_zip"]:
+            with self._zip(source_index).open(row["processed_path"]) as handle:
+                return Image.open(handle).copy()
+        data_root = source["data_root"]
+        if data_root is None:
+            raise ValueError(f"Source {source_index} does not have data_root.")
+        return Image.open(data_root / row["processed_path"])
