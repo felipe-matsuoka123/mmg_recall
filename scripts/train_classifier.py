@@ -270,6 +270,22 @@ def start_wandb(args: argparse.Namespace, config: dict[str, object]):
     )
 
 
+def log_wandb_artifact(run, run_dir: Path, artifact_name: str) -> None:
+    if run is None:
+        return
+    try:
+        import wandb
+    except ImportError:
+        return
+
+    artifact = wandb.Artifact(artifact_name, type="model")
+    for filename in ("best.pt", "last.pt", "config.json", "label_map.json"):
+        path = run_dir / filename
+        if path.exists():
+            artifact.add_file(str(path), name=filename)
+    run.log_artifact(artifact)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     args.data_zip = Path(args.data_zip) if args.data_zip else None
@@ -387,6 +403,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
     finally:
         if run:
+            artifact_name = args.wandb_run_name or args.run_dir.name
+            log_wandb_artifact(run, args.run_dir, artifact_name)
             run.finish()
 
     return 0

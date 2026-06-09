@@ -45,14 +45,14 @@ python scripts/create_mammo_datasets.py /path/to/dicoms data/processed --workers
 SPR grayscale smoke run with the simple CNN:
 
 ```bash
-python scripts/train_classifier.py --config config/spr_grayscale_simple_cnn.yaml
+python scripts/train_classifier.py --config config/baselines/spr_grayscale_simple_cnn.yaml
 ```
 
 Enable W&B for the same run:
 
 ```bash
 python scripts/train_classifier.py \
-  --config config/spr_grayscale_simple_cnn.yaml \
+  --config config/baselines/spr_grayscale_simple_cnn.yaml \
   --wandb \
   --wandb-run-name spr-grayscale-smoke
 ```
@@ -61,7 +61,7 @@ Any config value can be overridden from the CLI. For a small local GPU smoke tes
 
 ```bash
 python scripts/train_classifier.py \
-  --config config/spr_grayscale_simple_cnn.yaml \
+  --config config/baselines/spr_grayscale_simple_cnn.yaml \
   --epochs 1 \
   --batch-size 2 \
   --image-size 256 \
@@ -72,32 +72,50 @@ python scripts/train_classifier.py \
 ConvNeXt Tiny grayscale run:
 
 ```bash
-python scripts/train_classifier.py --config config/spr_grayscale_convnext_tiny.yaml
+python scripts/train_classifier.py --config config/baselines/spr_grayscale_convnext_tiny.yaml
 ```
 
 All available grayscale sources with the simple CNN at 512:
 
 ```bash
-python scripts/train_classifier.py --config config/all_grayscale_simple_cnn.yaml
+python scripts/train_classifier.py --config config/baselines/all_grayscale_simple_cnn.yaml
 ```
 
-The current combined label manifest does not match the processed RSNA image IDs,
-so RSNA contributes no labeled rows until that ID mapping is fixed. SPR and VinDr
-rows with matching labels are included.
-
-For cloud training, keep the config in git and override only the paths that vary
-by machine:
+Recommended first cloud experiment, using all available grayscale sources at
+1024 with pretrained ConvNeXt Tiny:
 
 ```bash
+python scripts/train_classifier.py --config config/cloud/all_grayscale_convnext_tiny_1024.yaml
+```
+
+With the current combined label manifest, the all-source grayscale config finds
+labeled rows for RSNA, SPR, and VinDr. RSNA uses `processed_path_stem` as the
+join key because its processed metadata image IDs differ from the manifest IDs.
+
+Cloud smoke test before the full run:
+
+```bash
+export TORCH_HOME=/mnt/outputs/torch-cache
+
 python scripts/train_classifier.py \
-  --config config/spr_grayscale_convnext_tiny.yaml \
-  --data-root /mnt/data/processed_datasets/spr/grayscale \
-  --data-zip "" \
-  --metadata-csv /mnt/data/processed_datasets/spr/grayscale_metadata.csv \
-  --labels-csv /mnt/data/combined_mammo_recall_labels_birads_only.csv \
-  --run-dir /mnt/outputs/spr_grayscale_convnext_tiny
+  --config config/cloud/smoke_all_grayscale_convnext_tiny.yaml \
+  --run-dir /mnt/outputs/cloud_smoke_all_grayscale_convnext_tiny
+```
+
+For cloud training, keep the config in git and place or symlink the data
+artifacts at the paths referenced by the config:
+
+```bash
+ln -s /mnt/data/processed_datasets processed_datasets
+export TORCH_HOME=/mnt/outputs/torch-cache
+
+python scripts/train_classifier.py \
+  --config config/cloud/all_grayscale_convnext_tiny_1024.yaml \
+  --run-dir /mnt/outputs/all_grayscale_convnext_tiny_1024
 ```
 
 The script writes `config.json`, `label_map.json`, `best.pt`, and `last.pt` under
 the configured `run_dir`. W&B logs loss, accuracy, and binary AUROC when both
-classes are present in an epoch partition.
+classes are present in an epoch partition. When W&B is enabled, the script also
+uploads `best.pt`, `last.pt`, `config.json`, and `label_map.json` as a model
+artifact at the end of the run.

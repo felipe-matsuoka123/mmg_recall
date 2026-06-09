@@ -9,7 +9,7 @@ Vast.ai instance local disk before training.
 processed_datasets/rsna/grayscale.zip
 processed_datasets/spr/grayscale.zip
 processed_datasets/vindr/grayscale.zip
-combined_mammo_recall_labels_birads_only.csv
+processed_datasets/combined_mammo_recall_labels_birads_only.csv
 ```
 
 Optional, for debugging only:
@@ -33,6 +33,7 @@ scripts/
 src/
 config/
 docs/
+notebooks/
 tests/
 environment.yml
 .gitignore
@@ -46,7 +47,7 @@ runs/
 wandb/
 preview/
 outputs/
-combined_mammo_recall_labels_birads_only.csv
+processed_datasets/combined_mammo_recall_labels_birads_only.csv
 ```
 
 The labels CSV is needed for training, but it contains dataset-derived local
