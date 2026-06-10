@@ -1,11 +1,11 @@
 data_sources:
   - dataset_name: rsna
-    data_zip: processed_datasets/rsna/grayscale.zip
+    data_zip: processed_datasets/rsna/rgb_multiwindow.zip
     row_key: processed_path_stem
   - dataset_name: spr
-    data_zip: processed_datasets/spr/grayscale.zip
+    data_zip: processed_datasets/spr/rgb_multiwindow.zip
   - dataset_name: vindr
-    data_zip: processed_datasets/vindr/grayscale.zip
+    data_zip: processed_datasets/vindr/rgb_multiwindow.zip
 
 labels_csv: processed_datasets/combined_mammo_recall_labels_birads_only.csv
 metadata_member: metadata.csv
@@ -15,21 +15,21 @@ label_col: target
 patient_col: patient_id
 dataset_col: dataset
 labels_dataset_col: dataset
-max_samples: 96
+max_samples:
 require_all_labels: false
 
-run_dir: runs/cloud_smoke_all_grayscale_convnext_tiny
+run_dir: runs/all_rgb_multiwindow_convnext_tiny_1024_weighed_loss
 model: convnext_tiny
-input_channels: 1
-image_size: 256
+input_channels: 3
+image_size: 1024
 
-epochs: 1
-batch_size: 8
+epochs: 10
+batch_size: 4
 lr: 0.0001
 weight_decay: 0.0001
-loss_weighting: none
+loss_weighting: balanced
 val_fraction: 0.2
-num_workers: 0
+num_workers: 2
 seed: 42
 device: auto
 pretrained: true
@@ -37,4 +37,4 @@ pretrained: true
 wandb: true
 wandb_project: mammorecall
 wandb_entity:
-wandb_run_name: cloud-smoke-all-grayscale-convnext-tiny
+wandb_run_name: all-rgb-multiwindow-convnext-tiny-1024-weighed-loss

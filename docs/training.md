@@ -69,6 +69,19 @@ python scripts/train_classifier.py \
   --num-workers 0
 ```
 
+## Weighted loss experiment
+
+Set `loss_weighting: balanced` in a training config to use class-weighted cross
+entropy. The training script computes weights from the training split only:
+
+```text
+class_weight = train_sample_count / (num_classes * train_class_count)
+```
+
+Leave `loss_weighting: none` for the unweighted baseline. The resolved
+`loss_class_weights` are written to `config.json`, printed at startup, and logged
+to W&B as part of the run config.
+
 ConvNeXt Tiny grayscale run:
 
 ```bash

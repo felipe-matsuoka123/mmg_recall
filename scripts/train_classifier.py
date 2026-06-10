@@ -7,6 +7,7 @@ import argparse
 import json
 import random
 import sys
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -67,6 +68,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument(
+        "--loss-weighting",
+        choices=["none", "balanced"],
+        default="none",
+        help="Class weighting strategy for CrossEntropyLoss.",
+    )
     parser.add_argument("--val-fraction", type=float, default=0.2)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
@@ -233,6 +240,41 @@ def limit_rows(
     return sampled_rows[:max_samples]
 
 
+def build_cross_entropy_loss(
+    *,
+    loss_weighting: str,
+    train_rows: list[dict[str, str]],
+    label_col: str,
+    label_map: dict[str, int],
+    device: torch.device,
+) -> tuple[nn.CrossEntropyLoss, list[float] | None]:
+    if loss_weighting == "none":
+        return nn.CrossEntropyLoss(), None
+    if loss_weighting != "balanced":
+        raise ValueError(f"Unsupported loss_weighting={loss_weighting!r}")
+
+    counts_by_index = Counter(label_map[row[label_col]] for row in train_rows)
+    missing_labels = [
+        label
+        for label, index in label_map.items()
+        if counts_by_index[index] == 0
+    ]
+    if missing_labels:
+        raise ValueError(
+            "Cannot use balanced loss weighting because the training split has "
+            f"no examples for labels: {missing_labels}"
+        )
+
+    total = len(train_rows)
+    num_classes = len(label_map)
+    weights = [
+        total / (num_classes * counts_by_index[index])
+        for index in range(num_classes)
+    ]
+    weight_tensor = torch.tensor(weights, dtype=torch.float32, device=device)
+    return nn.CrossEntropyLoss(weight=weight_tensor), weights
+
+
 def save_checkpoint(
     path: Path,
     *,
@@ -338,7 +380,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         num_classes=len(label_map),
         pretrained=args.pretrained,
     ).to(device)
-    criterion = nn.CrossEntropyLoss()
+    criterion, loss_class_weights = build_cross_entropy_loss(
+        loss_weighting=args.loss_weighting,
+        train_rows=train_rows,
+        label_col=args.label_col,
+        label_map=label_map,
+        device=device,
+    )
+    config["loss_class_weights"] = loss_class_weights
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     args.run_dir.mkdir(parents=True, exist_ok=True)
@@ -346,7 +395,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     (args.run_dir / "label_map.json").write_text(json.dumps(label_map, indent=2) + "\n")
     print(
         f"device={device} train_images={len(train_dataset)} "
-        f"val_images={len(val_dataset)} classes={label_map} sources={source_counts}"
+        f"val_images={len(val_dataset)} classes={label_map} sources={source_counts} "
+        f"loss_weighting={args.loss_weighting} loss_class_weights={loss_class_weights}"
     )
 
     run = start_wandb(args, config)
