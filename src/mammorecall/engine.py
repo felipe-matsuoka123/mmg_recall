@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 import torch
 from torch import nn
@@ -35,6 +35,7 @@ def run_epoch(
     *,
     device: torch.device,
     optimizer: torch.optim.Optimizer | None = None,
+    on_batch_end: Callable[[dict[str, float]], None] | None = None,
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(training)
@@ -67,6 +68,15 @@ def run_epoch(
             if logits.size(1) == 2:
                 positive_scores.extend(torch.softmax(logits.detach(), dim=1)[:, 1].cpu().tolist())
                 all_targets.extend(targets.detach().cpu().tolist())
+            if on_batch_end is not None:
+                on_batch_end(
+                    {
+                        "batch/loss": loss.item(),
+                        "running/loss": loss_sum / seen,
+                        "running/accuracy": correct / seen,
+                        "seen": seen,
+                    }
+                )
 
     metrics = {"loss": loss_sum / seen, "accuracy": correct / seen}
     auroc = binary_auroc(positive_scores, all_targets) if positive_scores else None

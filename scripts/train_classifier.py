@@ -76,6 +76,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--wandb-project", default="mammorecall")
     parser.add_argument("--wandb-entity", default=None)
     parser.add_argument("--wandb-run-name", default=None)
+    parser.add_argument("--wandb-log-interval", type=int, default=50)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -350,14 +351,34 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     run = start_wandb(args, config)
     best_accuracy = -1.0
+    global_step = 0
     try:
         for epoch in range(1, args.epochs + 1):
+            def log_train_batch(batch_metrics: dict[str, float]) -> None:
+                nonlocal global_step
+                global_step += 1
+                if not run or args.wandb_log_interval <= 0:
+                    return
+                if global_step % args.wandb_log_interval != 0:
+                    return
+                run.log(
+                    {
+                        "epoch": epoch,
+                        "train/batch_loss": batch_metrics["batch/loss"],
+                        "train/running_loss": batch_metrics["running/loss"],
+                        "train/running_accuracy": batch_metrics["running/accuracy"],
+                        "train/images_seen_in_epoch": batch_metrics["seen"],
+                    },
+                    step=global_step,
+                )
+
             train_metrics = run_epoch(
                 model,
                 train_loader,
                 criterion,
                 device=device,
                 optimizer=optimizer,
+                on_batch_end=log_train_batch,
             )
             val_metrics = run_epoch(model, val_loader, criterion, device=device)
             metrics = {
@@ -379,7 +400,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"val_auroc={val_metrics.get('auroc', float('nan')):.4f}"
             )
             if run:
-                run.log(metrics)
+                run.log(metrics, step=global_step)
 
             save_checkpoint(
                 args.run_dir / "last.pt",

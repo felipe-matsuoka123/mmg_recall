@@ -119,28 +119,77 @@ python scripts/train_classifier.py \
   --run-dir /mnt/outputs/cloud_smoke_all_rgb_multiwindow_convnext_tiny
 ```
 
-For cloud training, keep the config in git and place or symlink the data
-artifacts at the paths referenced by the config:
+For cloud training, keep the config in git and use the VM helper scripts:
 
 ```bash
+scripts/setup_vm.sh
+export TORCH_HOME=/mnt/outputs/torch-cache
+
+scripts/download_data.sh grayscale
+scripts/run_smoke.sh grayscale
+scripts/run_train.sh grayscale
+```
+
+RGB run:
+
+```bash
+scripts/download_data.sh rgb_multiwindow
+scripts/run_smoke.sh rgb_multiwindow
+scripts/run_train.sh rgb_multiwindow
+```
+
+The helpers use these defaults, which can be overridden with environment
+variables:
+
+```bash
+REMOTE=s2:mammo-recall-data
+DATA_ROOT=/mnt/data/processed_datasets
+OUTPUT_ROOT=/mnt/outputs
+```
+
+Equivalent manual grayscale commands:
+
+```bash
+python scripts/download_data.py \
+  --remote s2:mammo-recall-data \
+  --variant grayscale \
+  --execute
+
 ln -s /mnt/data/processed_datasets processed_datasets
 export TORCH_HOME=/mnt/outputs/torch-cache
+python scripts/preflight.py \
+  --config config/cloud/all_grayscale_convnext_tiny_1024.yaml \
+  --check-wandb \
+  --run-dir /mnt/outputs/all_grayscale_convnext_tiny_1024
 
 python scripts/train_classifier.py \
   --config config/cloud/all_grayscale_convnext_tiny_1024.yaml \
   --run-dir /mnt/outputs/all_grayscale_convnext_tiny_1024
 ```
 
-Full RGB run:
+Equivalent manual RGB commands:
 
 ```bash
+python scripts/download_data.py \
+  --remote s2:mammo-recall-data \
+  --variant rgb_multiwindow \
+  --execute
+
+python scripts/preflight.py \
+  --config config/cloud/all_rgb_multiwindow_convnext_tiny_1024.yaml \
+  --check-wandb \
+  --run-dir /mnt/outputs/all_rgb_multiwindow_convnext_tiny_1024
+
 python scripts/train_classifier.py \
   --config config/cloud/all_rgb_multiwindow_convnext_tiny_1024.yaml \
   --run-dir /mnt/outputs/all_rgb_multiwindow_convnext_tiny_1024
 ```
 
 The script writes `config.json`, `label_map.json`, `best.pt`, and `last.pt` under
-the configured `run_dir`. W&B logs loss, accuracy, and binary AUROC when both
-classes are present in an epoch partition. When W&B is enabled, the script also
-uploads `best.pt`, `last.pt`, `config.json`, and `label_map.json` as a model
-artifact at the end of the run.
+the configured `run_dir`. W&B logs running training loss/accuracy every 50
+batches by default, plus epoch-level train/validation loss, accuracy, and binary
+AUROC when both classes are present in an epoch partition. Change the live
+training logging frequency with `--wandb-log-interval`; set it to `0` to disable
+batch-level logging. When W&B is enabled, the script also uploads `best.pt`,
+`last.pt`, `config.json`, and `label_map.json` as a model artifact at the end of
+the run.

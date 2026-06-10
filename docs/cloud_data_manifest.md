@@ -62,3 +62,10 @@ processed_datasets/combined_mammo_recall_labels_birads_only.csv
 The labels CSV is needed for training, but it contains dataset-derived local
 metadata such as patient IDs and original local paths, so keep it as a data
 artifact rather than source code.
+
+The VM can download the needed artifacts with:
+
+```bash
+scripts/download_data.sh grayscale
+scripts/download_data.sh rgb_multiwindow
+```

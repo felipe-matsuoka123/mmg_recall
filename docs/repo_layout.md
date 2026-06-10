@@ -13,6 +13,12 @@ config/
 docs/
 notebooks/
 scripts/
+  download_data.py  # rclone wrapper for grayscale/RGB artifacts
+  preflight.py      # config, data, disk, CUDA, and W&B readiness checks
+  setup_vm.sh       # create VM data/output folders and repo data symlink
+  download_data.sh  # shell wrapper around download_data.py
+  run_smoke.sh      # preflight and run the selected smoke config
+  run_train.sh      # preflight and run the selected full config
 src/
 tests/
 environment.yml
