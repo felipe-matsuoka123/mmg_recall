@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -64,6 +65,18 @@ def check_wandb() -> bool:
     if shutil.which("wandb") is None:
         fail("wandb CLI is not on PATH")
         return False
+    if os.environ.get("WANDB_MODE", "").lower() in {"disabled", "offline"}:
+        fail(f"WANDB_MODE={os.environ['WANDB_MODE']}; metrics will not sync live")
+        return False
+    try:
+        import wandb
+    except ImportError:
+        fail("wandb Python package is not installed")
+        return False
+    if not getattr(wandb.api, "api_key", None):
+        fail("wandb is installed but no API key is available; run `wandb login`")
+        return False
+
     result = subprocess.run(
         ["wandb", "status"],
         check=False,
@@ -75,10 +88,7 @@ def check_wandb() -> bool:
         fail("wandb status failed")
         print(output.strip())
         return False
-    if '"api_key": null' in output:
-        fail("wandb is installed but not logged in")
-        return False
-    ok("wandb status looks configured")
+    ok("wandb API key is available")
     return True
 
 

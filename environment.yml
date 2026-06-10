@@ -10,6 +10,15 @@ dependencies:
   - pytest
   - pip
   - pip:
+      # PyTorch CUDA wheels:
+      # - Use cu128 by default because it works with NVIDIA drivers that support
+      #   CUDA 12.8/12.9. This avoids accidentally installing a newer cu130 wheel
+      #   on VMs whose driver is too old for CUDA 13.
+      # - After creating the env, verify with:
+      #   python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.version.cuda)"
+      # - If CUDA is unavailable, reinstall torch/torchvision from a wheel index
+      #   compatible with the VM driver, for example cu126.
+      - --extra-index-url https://download.pytorch.org/whl/cu128
       - torch
       - torchvision
       - pillow
