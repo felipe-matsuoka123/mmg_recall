@@ -12,6 +12,15 @@ processed_datasets/vindr/grayscale.zip
 processed_datasets/combined_mammo_recall_labels_birads_only.csv
 ```
 
+## Upload to R2 for RGB multi-window training
+
+```text
+processed_datasets/rsna/rgb_multiwindow.zip
+processed_datasets/spr/rgb_multiwindow.zip
+processed_datasets/vindr/rgb_multiwindow.zip
+processed_datasets/combined_mammo_recall_labels_birads_only.csv
+```
+
 Optional, for debugging only:
 
 ```text

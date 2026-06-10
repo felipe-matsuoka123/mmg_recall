@@ -88,6 +88,13 @@ Recommended first cloud experiment, using all available grayscale sources at
 python scripts/train_classifier.py --config config/cloud/all_grayscale_convnext_tiny_1024.yaml
 ```
 
+RGB multi-window experiment, using all available RGB sources at 1024 with
+pretrained ConvNeXt Tiny:
+
+```bash
+python scripts/train_classifier.py --config config/cloud/all_rgb_multiwindow_convnext_tiny_1024.yaml
+```
+
 With the current combined label manifest, the all-source grayscale config finds
 labeled rows for RSNA, SPR, and VinDr. RSNA uses `processed_path_stem` as the
 join key because its processed metadata image IDs differ from the manifest IDs.
@@ -102,6 +109,16 @@ python scripts/train_classifier.py \
   --run-dir /mnt/outputs/cloud_smoke_all_grayscale_convnext_tiny
 ```
 
+RGB cloud smoke test before the full RGB run:
+
+```bash
+export TORCH_HOME=/mnt/outputs/torch-cache
+
+python scripts/train_classifier.py \
+  --config config/cloud/smoke_all_rgb_multiwindow_convnext_tiny.yaml \
+  --run-dir /mnt/outputs/cloud_smoke_all_rgb_multiwindow_convnext_tiny
+```
+
 For cloud training, keep the config in git and place or symlink the data
 artifacts at the paths referenced by the config:
 
@@ -112,6 +129,14 @@ export TORCH_HOME=/mnt/outputs/torch-cache
 python scripts/train_classifier.py \
   --config config/cloud/all_grayscale_convnext_tiny_1024.yaml \
   --run-dir /mnt/outputs/all_grayscale_convnext_tiny_1024
+```
+
+Full RGB run:
+
+```bash
+python scripts/train_classifier.py \
+  --config config/cloud/all_rgb_multiwindow_convnext_tiny_1024.yaml \
+  --run-dir /mnt/outputs/all_rgb_multiwindow_convnext_tiny_1024
 ```
 
 The script writes `config.json`, `label_map.json`, `best.pt`, and `last.pt` under
