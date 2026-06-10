@@ -4,6 +4,7 @@ set -euo pipefail
 VARIANT="${1:-${VARIANT:-grayscale}}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-/mnt/outputs}"
 TORCH_HOME="${TORCH_HOME:-${OUTPUT_ROOT}/torch-cache}"
+UPLOAD_RESULTS="${UPLOAD_RESULTS:-1}"
 export TORCH_HOME
 
 case "${VARIANT}" in
@@ -29,3 +30,9 @@ python scripts/preflight.py \
 python scripts/train_classifier.py \
   --config "${CONFIG}" \
   --run-dir "${RUN_DIR}"
+
+if [ "${UPLOAD_RESULTS}" = "1" ]; then
+  scripts/upload_results.sh "${VARIANT}" "${RUN_DIR}"
+else
+  echo "Skipping result upload because UPLOAD_RESULTS=${UPLOAD_RESULTS}"
+fi

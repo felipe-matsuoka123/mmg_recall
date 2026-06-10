@@ -138,6 +138,10 @@ scripts/run_smoke.sh rgb_multiwindow
 scripts/run_train.sh rgb_multiwindow
 ```
 
+`run_train.sh` uploads the finished run directory back to `${REMOTE}/runs/` after
+successful training. Disable that with `UPLOAD_RESULTS=0` if you only want local
+checkpoints.
+
 The helpers use these defaults, which can be overridden with environment
 variables:
 
@@ -145,6 +149,7 @@ variables:
 REMOTE=s2:mammo-recall-data
 DATA_ROOT=/mnt/data/processed_datasets
 OUTPUT_ROOT=/mnt/outputs
+UPLOAD_RESULTS=1
 ```
 
 Equivalent manual grayscale commands:
@@ -183,6 +188,8 @@ python scripts/preflight.py \
 python scripts/train_classifier.py \
   --config config/cloud/all_rgb_multiwindow_convnext_tiny_1024.yaml \
   --run-dir /mnt/outputs/all_rgb_multiwindow_convnext_tiny_1024
+
+scripts/upload_results.sh rgb_multiwindow
 ```
 
 The script writes `config.json`, `label_map.json`, `best.pt`, and `last.pt` under

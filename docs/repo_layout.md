@@ -19,6 +19,7 @@ scripts/
   download_data.sh  # shell wrapper around download_data.py
   run_smoke.sh      # preflight and run the selected smoke config
   run_train.sh      # preflight and run the selected full config
+  upload_results.sh # copy completed run outputs back to object storage
 src/
 tests/
 environment.yml
