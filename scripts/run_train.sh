@@ -9,18 +9,22 @@ export TORCH_HOME
 
 case "${VARIANT}" in
   grayscale)
-    CONFIG="config/cloud/all_grayscale_convnext_tiny_1024.yaml"
-    RUN_DIR="${OUTPUT_ROOT}/all_grayscale_convnext_tiny_1024"
+    DEFAULT_CONFIG="config/cloud_exp/all_grayscale_convnext_tiny_1024.yaml"
+    DEFAULT_RUN_NAME="all_grayscale_convnext_tiny_1024"
     ;;
   rgb|rgb_multiwindow)
-    CONFIG="config/cloud/all_rgb_multiwindow_convnext_tiny_1024.yaml"
-    RUN_DIR="${OUTPUT_ROOT}/all_rgb_multiwindow_convnext_tiny_1024"
+    DEFAULT_CONFIG="config/cloud_exp/all_rgb_multiwindow_convnext_tiny_1024.yaml"
+    DEFAULT_RUN_NAME="all_rgb_multiwindow_convnext_tiny_1024"
     ;;
   *)
     echo "Usage: $0 grayscale|rgb_multiwindow" >&2
     exit 2
     ;;
 esac
+
+CONFIG="${CONFIG:-${DEFAULT_CONFIG}}"
+RUN_NAME="${RUN_NAME:-${DEFAULT_RUN_NAME}}"
+RUN_DIR="${RUN_DIR:-${OUTPUT_ROOT}/${RUN_NAME}}"
 
 python scripts/preflight.py \
   --config "${CONFIG}" \
@@ -32,7 +36,7 @@ python scripts/train_classifier.py \
   --run-dir "${RUN_DIR}"
 
 if [ "${UPLOAD_RESULTS}" = "1" ]; then
-  scripts/upload_results.sh "${VARIANT}" "${RUN_DIR}"
+  RUN_NAME="${RUN_NAME}" scripts/upload_results.sh "${VARIANT}" "${RUN_DIR}"
 else
   echo "Skipping result upload because UPLOAD_RESULTS=${UPLOAD_RESULTS}"
 fi

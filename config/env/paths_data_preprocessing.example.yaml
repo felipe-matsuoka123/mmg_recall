@@ -1,0 +1,13 @@
+# Copy this file to config/env/paths_data_preprocessing.yaml on each machine or VM.
+# Relative paths are resolved from the directory where you run the script.
+
+vindr_csv: /path/to/VinDr_Mammo/breast-level_annotations.csv
+vindr_dicom_dir: /path/to/VinDr_Mammo/images
+
+rsna_csv: /path/to/rsna_breast/train.csv
+rsna_dicom_dir: /path/to/rsna_breast/train_images
+
+spr_csv: /path/to/SPR_Mammo_Recall_train.csv
+spr_dicom_dir: /path/to/SPR_Mammo_Recall
+
+output: processed_datasets/combined_mammo_recall_labels.csv

@@ -8,6 +8,8 @@ data_sources:
     data_zip: processed_datasets/vindr/grayscale.zip
 
 labels_csv: processed_datasets/combined_mammo_recall_labels_birads_only.csv
+split_csv: processed_datasets/combined_mammo_recall_splits_spr_holdout.csv
+split_col: experiment_split
 metadata_member: metadata.csv
 label_key: image_id
 row_key: image_id

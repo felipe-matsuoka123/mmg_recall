@@ -8,11 +8,11 @@ export TORCH_HOME
 
 case "${VARIANT}" in
   grayscale)
-    CONFIG="config/cloud/smoke_all_grayscale_convnext_tiny.yaml"
+    CONFIG="config/cloud_exp/smoke_all_grayscale_convnext_tiny.yaml"
     RUN_DIR="${OUTPUT_ROOT}/cloud_smoke_all_grayscale_convnext_tiny"
     ;;
   rgb|rgb_multiwindow)
-    CONFIG="config/cloud/smoke_all_rgb_multiwindow_convnext_tiny.yaml"
+    CONFIG="config/cloud_exp/smoke_all_rgb_multiwindow_convnext_tiny.yaml"
     RUN_DIR="${OUTPUT_ROOT}/cloud_smoke_all_rgb_multiwindow_convnext_tiny"
     ;;
   *)

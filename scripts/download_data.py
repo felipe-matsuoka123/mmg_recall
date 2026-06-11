@@ -10,6 +10,7 @@ from pathlib import Path
 DATASETS = ("rsna", "spr", "vindr")
 VARIANTS = ("grayscale", "rgb_multiwindow")
 LABELS = "combined_mammo_recall_labels_birads_only.csv"
+SPLITS = "combined_mammo_recall_splits_spr_holdout.csv"
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -40,6 +41,11 @@ def main(argv: list[str] | None = None) -> int:
     remote = args.remote.rstrip("/")
     rclone_copy(
         f"{remote}/processed_datasets/{LABELS}",
+        args.data_root,
+        execute=args.execute,
+    )
+    rclone_copy(
+        f"{remote}/processed_datasets/{SPLITS}",
         args.data_root,
         execute=args.execute,
     )

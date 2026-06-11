@@ -14,19 +14,20 @@ from pathlib import Path
 from typing import Any
 
 import pydicom
+import yaml
 
 
-DEFAULT_VINDR_CSV = Path(
-    "/media/felipe/KINGSTON/datasets/VinDr_Mammo/"
-    "vindr-mammo-a-large-scale-benchmark-dataset-for-computer-aided-detection-and-diagnosis-"
-    "in-full-field-digital-mammography-1.0.0/breast-level_annotations.csv"
-)
-DEFAULT_VINDR_DICOM_DIR = DEFAULT_VINDR_CSV.parent / "images"
-DEFAULT_RSNA_CSV = Path("/media/felipe/KINGSTON/datasets/rsna_breast/train.csv")
-DEFAULT_RSNA_DICOM_DIR = DEFAULT_RSNA_CSV.parent / "train_images"
-DEFAULT_SPR_CSV = Path("/media/felipe/KINGSTON/datasets/SPR_Mammo_Recall_train.csv")
-DEFAULT_SPR_DICOM_DIR = Path("/media/felipe/KINGSTON/datasets/SPR_Mammo_Recall")
-DEFAULT_OUTPUT = Path("combined_mammo_recall_labels_final.csv")
+DEFAULT_PATHS_CONFIG = Path("config/env/paths_data_preprocessing.yaml")
+DEFAULT_OUTPUT = Path("processed_datasets/combined_mammo_recall_labels.csv")
+PATH_CONFIG_KEYS = {
+    "vindr_csv",
+    "vindr_dicom_dir",
+    "rsna_csv",
+    "rsna_dicom_dir",
+    "spr_csv",
+    "spr_dicom_dir",
+    "output",
+}
 
 OUTPUT_FIELDS = [
     "dataset",
@@ -66,13 +67,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "BI-RADS 1/2 map to 0, BI-RADS 0/3/4/5 map to 1, and BI-RADS 6 is excluded."
         )
     )
-    parser.add_argument("--vindr-csv", type=Path, default=DEFAULT_VINDR_CSV)
-    parser.add_argument("--vindr-dicom-dir", type=Path, default=DEFAULT_VINDR_DICOM_DIR)
-    parser.add_argument("--rsna-csv", type=Path, default=DEFAULT_RSNA_CSV)
-    parser.add_argument("--rsna-dicom-dir", type=Path, default=DEFAULT_RSNA_DICOM_DIR)
-    parser.add_argument("--spr-csv", type=Path, default=DEFAULT_SPR_CSV)
-    parser.add_argument("--spr-dicom-dir", type=Path, default=DEFAULT_SPR_DICOM_DIR)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--paths-config",
+        type=Path,
+        default=DEFAULT_PATHS_CONFIG,
+        help=(
+            "Local YAML file with dataset paths. Defaults to config/env/paths_data_preprocessing.yaml "
+            "when that file exists."
+        ),
+    )
+    parser.add_argument("--vindr-csv", type=Path, default=None)
+    parser.add_argument("--vindr-dicom-dir", type=Path, default=None)
+    parser.add_argument("--rsna-csv", type=Path, default=None)
+    parser.add_argument("--rsna-dicom-dir", type=Path, default=None)
+    parser.add_argument("--spr-csv", type=Path, default=None)
+    parser.add_argument("--spr-dicom-dir", type=Path, default=None)
+    parser.add_argument("--output", type=Path, default=None)
     parser.add_argument(
         "--rsna-label-mode",
         choices=["recall_or_cancer", "birads_only", "cancer"],
@@ -96,7 +106,51 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "This is more precise for unilateral positive recalls but can be slow on external disks."
         ),
     )
-    return parser.parse_args(argv)
+    return apply_path_config(parser.parse_args(argv))
+
+
+def read_paths_config(path: Path) -> dict[str, Path]:
+    with path.open() as handle:
+        values = yaml.safe_load(handle) or {}
+    if not isinstance(values, dict):
+        raise SystemExit(f"Paths config must be a mapping: {path}")
+    unknown_keys = sorted(set(values) - PATH_CONFIG_KEYS)
+    if unknown_keys:
+        formatted = ", ".join(unknown_keys)
+        raise SystemExit(f"Unknown paths config key(s) in {path}: {formatted}")
+    return {
+        key: Path(value)
+        for key, value in values.items()
+        if value is not None and str(value).strip()
+    }
+
+
+def apply_path_config(args: argparse.Namespace) -> argparse.Namespace:
+    config_values = {}
+    if args.paths_config.exists():
+        config_values = read_paths_config(args.paths_config)
+    elif args.paths_config != DEFAULT_PATHS_CONFIG:
+        raise SystemExit(f"Paths config does not exist: {args.paths_config}")
+
+    for key, value in config_values.items():
+        if getattr(args, key) is None:
+            setattr(args, key, value)
+    if args.output is None:
+        args.output = DEFAULT_OUTPUT
+
+    missing = [
+        key
+        for key in sorted(PATH_CONFIG_KEYS - {"output"})
+        if getattr(args, key) is None
+    ]
+    if missing:
+        formatted = ", ".join(missing)
+        raise SystemExit(
+            f"Missing dataset path(s): {formatted}. Create config/env/paths_data_preprocessing.yaml, "
+            "pass --paths-config, or pass the "
+            "paths explicitly on the CLI."
+        )
+    return args
 
 
 def read_csv_rows(path: Path) -> list[dict[str, str]]:

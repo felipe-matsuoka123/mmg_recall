@@ -13,10 +13,10 @@ fi
 
 case "${VARIANT}" in
   grayscale)
-    RUN_NAME="all_grayscale_convnext_tiny_1024"
+    DEFAULT_RUN_NAME="all_grayscale_convnext_tiny_1024"
     ;;
   rgb|rgb_multiwindow)
-    RUN_NAME="all_rgb_multiwindow_convnext_tiny_1024"
+    DEFAULT_RUN_NAME="all_rgb_multiwindow_convnext_tiny_1024"
     ;;
   *)
     echo "Usage: $0 grayscale|rgb_multiwindow [run_dir]" >&2
@@ -24,6 +24,7 @@ case "${VARIANT}" in
     ;;
 esac
 
+RUN_NAME="${RUN_NAME:-${DEFAULT_RUN_NAME}}"
 RUN_DIR="${2:-${OUTPUT_ROOT}/${RUN_NAME}}"
 DESTINATION="${REMOTE}/runs/${RUN_NAME}"
 

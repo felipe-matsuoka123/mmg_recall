@@ -29,6 +29,10 @@ __pycache__/
 # Local secrets and cloud credentials
 .env
 .env.*
+config/env/paths_data_preprocessing.yaml
 *.pem
 *.key
 *.jsonl
+
+# Local inference for submission
+processed_spr/

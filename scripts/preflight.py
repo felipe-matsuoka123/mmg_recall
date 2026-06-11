@@ -122,6 +122,15 @@ def main(argv: list[str] | None = None) -> int:
         failures += 1
         fail(f"missing labels CSV: {train_args.labels_csv}")
 
+    split_csv = getattr(train_args, "split_csv", None)
+    if split_csv:
+        split_csv = Path(split_csv)
+        if split_csv.exists():
+            ok(f"split CSV exists: {split_csv}")
+        else:
+            failures += 1
+            fail(f"missing split CSV: {split_csv}")
+
     for path in source_paths(train_args):
         if not check_zip(path, train_args.metadata_member):
             failures += 1
